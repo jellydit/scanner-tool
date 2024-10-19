@@ -1,3 +1,1 @@
-backend {
-  value for the tf state (s3 path suffix)
-}
+key = "path of the tf state (s3 path suffix)"
