@@ -1,0 +1,24 @@
+#!/bin/bash
+
+AWS_REGION="${aws_region}"
+ACCOUNT_ID="${account_id}"
+CONTROLLER_REPO="${controller_repo}"
+CRAWLER_REPO="${crawler_repo}"
+
+cd docker
+
+echo "Building Docker images..."
+docker build -t ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${CONTROLLER_REPO}:latest -f ./controller/Dockerfile
+docker build -t ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${CRAWLER_REPO}:latest -f ./crawler/Dockerfile
+
+aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+
+echo "Pushing Docker images to ECR..."
+docker push ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${CONTROLLER_REPO}:latest
+docker push ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${CRAWLER_REPO}:latest
+
+echo "Built and Pushed Images completed!\n\nRedeploying..."
+
+terraform init
+terraform apply -auto-approve
+echo "Redeployment completed!"
