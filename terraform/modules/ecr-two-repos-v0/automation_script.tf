@@ -8,5 +8,5 @@ resource "local_file" "automation_script" {
     crawler_repo    = aws_ecr_repository.repo2.name
   })
 
-  file_permission = "0755"  # Make the script executable
+  file_permission = "0755" # Make the script executable
 }
