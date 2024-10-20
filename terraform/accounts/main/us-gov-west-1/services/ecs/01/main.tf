@@ -8,6 +8,8 @@ module "ecs_question_3" {
 
   name = "${local.cluster_name_prefix}-${local.cluster_number}-${local.aws_region_abbr}"
   other_module_required_vars_here
+  
+  # number crawler_tasks not set here, would come in from automation script that sets an ENVVAR
 }
 
 module "ecs_question_3" {

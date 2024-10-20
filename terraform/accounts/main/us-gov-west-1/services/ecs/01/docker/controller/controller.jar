@@ -1,1 +1,33 @@
 # this jar would get populated by some other process/pipeline?
+
+# Logic
+- connect to db (one for each thread... in case we need to scale big, we don't want threads to block each other)
+
+thread 1:
+  - listen for jobs (from SQS or something?)
+  - add new job into db
+  - update db CREATION_TIME
+    '$(date +%s)'
+  - update db SCANNER_HOSTNAME:
+    '$(hostname)'
+  - update db JOB_STATUS:
+    'QUEUED'
+
+thread 2:
+  - listen for crawlers '/jobs' (asking)
+  - look for 'AVAILALBE' job
+  - respond to crawler with job id and params of job
+  - update db JOB_STATUS:
+    'RUNNING'
+
+thread 3:
+  - listen for crawlers '/result' (returning)
+  - verify crawler job id and result
+  - update db JOB_STATUS:
+    'COMPLETE' or 'ERROR'
+  - update db COMPLETION_TIME
+
+thread 4:
+  - periodically look for JOB_STATUS:
+    'ERROR'
+  - alert? requeue?

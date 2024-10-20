@@ -5,10 +5,32 @@ resource "local_file" "crawler_config" {
   filename = "${path.cwd}/docker/crawler/config.json"
 
   content = templatefile("${path.module}/crawler_config.tftpl", {
-    controller_hostname   = aws_ecs_service.controller_service.name
-    controller_port       = var.controller_port
-    chromium_download_url = "http://path.to.chromium"
-    chromium_extract_path = "/path/to/chromium"
+    secret_paths          = [for i in range(var.controller_desired_count) : aws_secretsmanager_secret.controller_secrets[i].name]
+    chromium_download_url = "https://url.to.chromium.zip"
+    chromium_extract_path = "/opt/chromium_custom"
     debug_port            = var.debug_port
+  })
+}
+
+resource "aws_secretsmanager_secret" "controller_secrets" {
+  count = var.controller_tasks
+  name = "controller_secret_${count.index}"
+}
+
+resource "aws_secretsmanager_secret_version" "controller_secret_version" {
+  secret_id     = aws_secretsmanager_secret.controller_secrets.id
+  secret_string = jsonencode({
+    hostname = aws_ecs_service.controller_service.name
+    port     = var.controller_port
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "controller_secret_version" {
+  count       = var.controller_tasks
+  secret_id   = aws_secretsmanager_secret.controller_secrets[count.index].id
+
+  secret_string = jsonencode({
+    hostname = random_string.hostname[count.index].result
+    port     = var.controller_port
   })
 }

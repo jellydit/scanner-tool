@@ -1,24 +1,69 @@
 #!/bin/bash
+set -euo pipefail
 
-AWS_REGION="${aws_region}"
-ACCOUNT_ID="${account_id}"
-CONTROLLER_REPO="${controller_repo}"
-CRAWLER_REPO="${crawler_repo}"
+AWS_REGION="$aws_region"
+ACCOUNT_ID="$account_id"
+CONTROLLER_REPO="$controller_repo"
+CRAWLER_REPO="$crawler_repo"
+REPO_MAIN_BRANCH="origin/main"
 
-cd docker
+# Function to check if the build context has changed, if so: build new image, push to ECR
+check_and_build_docker_image() {
+  local build_file="$1"
+  local repo="$2"
 
-echo "Building Docker images..."
-docker build -t ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${CONTROLLER_REPO}:latest -f ./controller/Dockerfile
-docker build -t ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${CRAWLER_REPO}:latest -f ./crawler/Dockerfile
+  # Check if the specific Dockerfile has changed compared to our main branch
+  git fetch origin
+  if ! git diff --quiet $REPO_MAIN_BRANCH -- "$build_file"; then
+    echo "Changes detected. Rebuilding Docker image '$build_file'..."
+    docker build -t $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$repo:latest -f $build_file
+    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+    docker push $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$repo:latest
+    echo "Built and Pushed $build_file completed!\n\nRedeploying..."
+  else
+    echo "No changes detected. Skipping build for '$build_file'."
+    return 1
+  fi
+}
 
-aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+# Build images and push changes to ECR if necessary (changes detected in our current branch, compared to main branch
+check_and_build_docker_image "./docker/controller/Dockerfile" $CONTROLLER_REPO
+check_and_build_docker_image "./docker/crawler/Dockerfile" $CRAWLER_REPO
 
-echo "Pushing Docker images to ECR..."
-docker push ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${CONTROLLER_REPO}:latest
-docker push ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${CRAWLER_REPO}:latest
-
-echo "Built and Pushed Images completed!\n\nRedeploying..."
-
+# Begin logic around "finishing PENDING tasks"
 terraform init
+
+CURRENT_CRAWLER_TASKS=$(terraform output -json crawler_desired_count | jq -r '.')
+
+# Connect db
+QUEUED_TASKS=$(SELECT count() FROM jobs WHERE TASK_STATUS = 'QUEUED')
+
+if [[ "$QUEUED_TASKS" -eq 0 ]] then;
+  NEW_CRAWLER_TASKS=0 # we want to save $
+elif [[ "$QUEUED_TASKS" -gt CURRENT_CRAWLER_TASKS ]]; then
+  # SOME LOGIC TO BUMP NEW TASK NUMBERS IF THERE'S A TONNE OF QUEUED (5 won't get through 500 queued that quickly)
+  NEW_CRAWLER_TASKS=$CURRENT_CRAWLER_TASKS+SOME_NUMBER
+else
+  echo "error"
+  exit
+fi
+
+export TF_VAR_crawler_tasks=$NEW_CRAWLER_TASKS # this number can be adjusted based on some logic in this script... or from parameter passed in?
+
 terraform apply -auto-approve
 echo "Redeployment completed!"
+
+if [[ "$NEW_CRAWLER_TASKS" -eq 0 ]] then;
+  exit
+fi
+
+# update DB statuses for $NEW_CRAWLER_TASKS number of jobs to AVAILALBE
+UPDATE jobs SET TASK_STATUS = 'AVAILABLE'
+WHERE id IN (
+    SELECT id FROM (
+        SELECT id
+        FROM jobs
+        WHERE TASK_STATUS = 'QUEUED'
+        LIMIT $NEW_CRAWLER_TASKS
+    ) AS temp_table
+);
