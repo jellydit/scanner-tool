@@ -1,0 +1,3 @@
+selenium # I'm guessing to be used to automate some testing of webapps in python via chromium within crawler script?
+boto3
+# obviously any other python package requirements would go here
